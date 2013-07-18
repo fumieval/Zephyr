@@ -1,10 +1,14 @@
 {-# LANGUAGE ImplicitParams #-}
-module Language.LazyZ.Syntax where
+module Language.Zephyr.Syntax where
 
 import Control.Applicative
 import Text.Trifecta
+import Text.Parser.Expression
+import Text.Parser.Token.Style
+import Data.Reflection
 
-data Dec = FunD String [([Pat], Exp)] | ValD Pat Exp
+
+data Dec = FunD String [([Pat], Exp)] | ValD Pat Exp deriving (Show, Eq)
 
 data Exp = VarE String
     | AppE Exp Exp
@@ -12,12 +16,14 @@ data Exp = VarE String
     | Lit Lit
     deriving (Show, Eq)
 
-data Lit = IntegerL Integer | StringL String
+data Lit = IntegerL Integer | StringL String deriving (Show, Eq)
 
-data Pat = WildP | VarP String
+data Pat = WildP | VarP String deriving (Show, Eq)
 
-lit :: Parser Lit
-lit = choice [IntegerL <$> natural, StringL <$> stringLiteral]
+type OpTable = OperatorTable Parser Exp
+
+literal :: Parser Lit
+literal = choice [IntegerL <$> natural, StringL <$> stringLiteral]
 
 identifier = ident haskellIdents
 
@@ -27,12 +33,13 @@ parseOperator = do
 	i <- natural
 	spaces
 	name <- identifier
-	return $ Infix (reservedOp name >>= \op x y -> VarE op `AppE` x `AppE` y) assoc
+	return (fromEnum i, Infix (symbol name >>= \op -> return $ \x y -> VarE op `AppE` x `AppE` y) assoc)
 	where
 		parseAssoc = choice [AssocLeft <$ symbol "infixl", AssocRight <$ symbol "infixr", AssocNone <$ symbol "infix"]
 
-parseValD :: Given OperatorTable => Parser Dec
-	lh <- parsePat
+parseValD :: Given OpTable => Parser Dec
+parseValD = do
+    lh <- parsePat
     symbol "="
     rh <- expr
     return $ ValD lh rh
@@ -40,7 +47,7 @@ parseValD :: Given OperatorTable => Parser Dec
 parsePat :: Parser Pat
 parsePat = choice [WildP <$ symbol "_", VarP <$> identifier]
 
-lambda :: Given OperatorTable => Parser Exp
+lambda :: Given OpTable => Parser Exp
 lambda = do
 	symbol "λ" <|> symbol "\\"
 	p <- parsePat
@@ -48,21 +55,19 @@ lambda = do
 	e <- expr
 	return $ Lambda p e
 
-term :: Given OperatorTable => Parser Exp
+term :: Given OpTable => Parser Exp
 term = whiteSpace *> term' <* whiteSpace where
     term' = try section
         <|> parens expr
         <|> lambda
-        <|> try quote
-        <|> literal
-        <|> Var <$> identifier
+        <|> Lit <$> literal
+        <|> VarE <$> identifier
 
-termA :: Given OperatorTable => Parser Exp
-termA = foldl Apply <$> term <*> many term
+termA :: Given OpTable => Parser Exp
+termA = foldl AppE <$> term <*> many term
 
-section :: Given OperatorTable => Parser Exp
-section = Var <$> (char '(' *> operator <* char ')')
+section :: Given OpTable => Parser Exp
+section = empty -- = VarE <$> (char '(' *> operator <* char ')')
 
-expr :: Given OperatorTable => Parser Exp
+expr :: Given OpTable => Parser Exp
 expr = buildExpressionParser given termA
-
