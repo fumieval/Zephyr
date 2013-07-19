@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Language.Zephyr.Syntax where
 
 import Control.Applicative
@@ -7,14 +7,14 @@ import Text.Parser.Expression
 import Text.Parser.Token.Style
 import Data.Reflection
 
-data Clause = Clause [Pat] Exp
+data Clause = Clause [Pat] Exp deriving (Show, Eq)
 
 data Dec = FunD String [Clause] | ValD Pat Exp deriving (Show, Eq)
 
 data Exp = VarE String
     | AppE Exp Exp
-    | Lambda [Clause]
-    | Lit Lit
+    | LambdaE [Clause]
+    | LitE Lit
     deriving (Show, Eq)
 
 data Lit = IntegerL Integer | StringL String deriving (Show, Eq)
@@ -28,7 +28,7 @@ literal = choice [IntegerL <$> natural, StringL <$> stringLiteral]
 
 identifier = ident haskellIdents
 
-parseOperator :: Monad m => Parser (Int, Operator Parser Exp)
+parseOperator :: Parser (Int, Operator Parser Exp)
 parseOperator = do
 	assoc <- parseAssoc
 	i <- natural
@@ -54,13 +54,13 @@ lambda = do
 	ps <- some parsePat
 	symbol "->"
 	e <- expr
-	return $ Lambda [Clause ps e]
+	return $ LambdaE [Clause ps e]
 
 term :: Given OpTable => Parser Exp
 term = token $ try section
         <|> parens expr
         <|> lambda
-        <|> Lit <$> literal
+        <|> LitE <$> literal
         <|> VarE <$> identifier
 
 termA :: Given OpTable => Parser Exp
