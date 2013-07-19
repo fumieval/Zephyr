@@ -7,12 +7,13 @@ import Text.Parser.Expression
 import Text.Parser.Token.Style
 import Data.Reflection
 
+data Clause = Clause [Pat] Exp
 
-data Dec = FunD String [([Pat], Exp)] | ValD Pat Exp deriving (Show, Eq)
+data Dec = FunD String [Clause] | ValD Pat Exp deriving (Show, Eq)
 
 data Exp = VarE String
     | AppE Exp Exp
-    | Lambda Pat Exp
+    | Lambda [Clause]
     | Lit Lit
     deriving (Show, Eq)
 
@@ -50,14 +51,13 @@ parsePat = choice [WildP <$ symbol "_", VarP <$> identifier]
 lambda :: Given OpTable => Parser Exp
 lambda = do
 	symbol "λ" <|> symbol "\\"
-	p <- parsePat
+	ps <- some parsePat
 	symbol "->"
 	e <- expr
-	return $ Lambda p e
+	return $ Lambda [Clause ps e]
 
 term :: Given OpTable => Parser Exp
-term = whiteSpace *> term' <* whiteSpace where
-    term' = try section
+term = token $ try section
         <|> parens expr
         <|> lambda
         <|> Lit <$> literal
