@@ -40,23 +40,17 @@ varBind v t
     | otherwise = liftF $ Subst v t ()
 
 unify :: Type -> Type -> TypeCheck ()
-unify ta tb = join $ typeExpr <$> apply ta <*> apply tb where
-    typeExpr (AppT s t) (AppT u v) = do
-        typeExpr s u
+unify ta tb = join $ uni <$> apply ta <*> apply tb where
+    uni (AppT s t) (AppT u v) = do
+        uni s u
         unify t v
-    typeExpr (VarT s) t = varBind s t
-    typeExpr s (VarT t) = varBind t s
-    typeExpr (ConT s) (ConT t) | s == t = return ()
-    typeExpr s t = typeError $ text "Failed to unify " <> prettyType s <> text " with " <> prettyType t
+    uni (VarT s) t = varBind s t
+    uni s (VarT t) = varBind t s
+    uni (ConT s) (ConT t) | s == t = return ()
+    uni s t = typeError $ text "Failed to unify " <> prettyType s <> text " with " <> prettyType t
 
 apply :: Type -> TypeCheck Type
 apply t = liftF $ Apply t id
-
-applyExpr :: Expr Type -> TypeCheck (Expr Type)
-applyExpr (t :< b) = (:<) <$> apply t <*> traverse applyExpr b
-
-applyPat :: Pat Type -> TypeCheck (Pat Type)
-applyPat (t :< b) = (:<) <$> apply t <*> traverse applyPat b
 
 arrT :: Type -> Type -> Type
 arrT s t = AppT (AppT ArrT s) t
@@ -64,7 +58,7 @@ arrT s t = AppT (AppT ArrT s) t
 exprTypeOf :: Type -> Expr Type -> TypeCheck (Expr Type)
 exprTypeOf t e = do
     unify t (extract e)
-    applyExpr e
+    traverse apply e
 
 type Binding = Map.Map Name Type
 
@@ -92,8 +86,8 @@ typeExpr bs (_ :< expr) = case expr of
     LambdaE [Clause ups ue] -> do
         ps <- mapM (typePat bs) ups -- slack
         bindings <- unionBinding bs $ Map.fromList (ps ^.. traverse . patVars)
-        e <- typeExpr bindings ue >>= applyExpr
-        ps' <- mapM applyPat ps
+        e <- typeExpr bindings ue >>= traverse apply
+        ps' <- mapM (traverse apply) ps
         return $ foldr (\p r -> extract p `arrT` r) (extract e) ps' :< LambdaE [Clause ps' e]
     LitE (IntegerL i) -> return $ ConT "Int" :< LitE (IntegerL i)
     LitE (StringL i) -> return $ ConT "String" :< LitE (StringL i)
@@ -108,13 +102,13 @@ typePat _ (_ :< VarP v) = do
 typePat bs (_ :< SigP t up) = do
     p <- typePat bs up
     unify t (extract p)
-    applyPat p
+    traverse apply p
 typePat bs (_ :< ConP name ups) = case bs ^? ix name of
     Nothing -> typeError ("Not in scope:" <+> prettyName name)
     Just t -> do
         ps <- mapM (typePat bs) ups
         c <- go 0 t ps
-        ps' <- mapM applyPat ps
+        ps' <- mapM (traverse apply) ps
         return $ c :< ConP name ps'
     where
         go n (AppT (AppT ArrT s) t) (p : ps) = do
