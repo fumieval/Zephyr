@@ -19,6 +19,7 @@ patVars :: Traversal' (Pat a) (Name, a)
 patVars f (t :< VarP v) = f (v, t) <&> \(v', t') -> t' :< VarP v'
 patVars f (t :< WildP) = pure (t :< WildP)
 patVars f (t :< ConP n ss) = (t :<) <$> ConP n <$> traverse (patVars f) ss
+patVars f (t :< SigP s p) = (t :<) <$> SigP s <$> patVars f p
 
 var :: Name -> Traversal' (Expr a) (Expr a)
 var name f (t :< VarE n) | name == n = f (t :< VarE n)

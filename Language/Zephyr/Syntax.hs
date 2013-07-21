@@ -1,4 +1,5 @@
-{-# LANGUAGE FlexibleContexts, DeriveFunctor, TemplateHaskell, Rank2Types #-}
+{-# LANGUAGE FlexibleContexts, TemplateHaskell, Rank2Types #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module Language.Zephyr.Syntax (
     Name
     , ParseEnv(..)
@@ -29,7 +30,7 @@ import Text.Trifecta
 
 type Name = String
 
-data Clause b a = Clause [Pat b] a deriving (Show, Eq, Functor)
+data Clause b a = Clause [Pat b] a deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data Lit = IntegerL Integer | StringL String deriving (Show, Eq)
 
@@ -41,9 +42,12 @@ data ExprBase b a = VarE Name
     | LambdaE [Clause b a]
     | LitE Lit
     | HoleE
-    deriving (Show, Eq, Functor)
+    deriving (Show, Eq, Functor, Foldable, Traversable)
 
-data PatBase a = WildP | VarP Name | ConP Name [a] deriving (Show, Eq, Functor)
+data PatBase a = WildP
+    | VarP Name
+    | ConP Name [a]
+    | SigP Type a deriving (Show, Eq, Functor, Foldable, Traversable)
 
 type Pat = Cofree PatBase
 type Expr p = Cofree (ExprBase p) p
@@ -53,32 +57,6 @@ type ExprTable = OperatorTable Parser (Expr ())
 data Type = ArrT | VarT TyVar | ConT Name | AppT Type Type deriving (Show, Eq)
 
 data TyVar = AutoVar Int | UserVar String deriving (Show, Eq, Ord)
-
-instance Foldable (Clause b) where
-    foldMap f (Clause _ a) = f a
-
-instance Foldable (ExprBase b) where
-    foldMap f (AppE a b) = f a <> f b
-    foldMap f (LambdaE cs) = foldMap (foldMap f) cs
-    foldMap _ _ = mempty
-
-instance Traversable (Clause b) where
-    traverse f (Clause ps a) = Clause ps <$> f a
-
-instance Traversable (ExprBase b) where
-    traverse f (AppE a b) = AppE <$> f a <*> f b
-    traverse f (LambdaE cs) = LambdaE <$> traverse (traverse f) cs
-    traverse _ (LitE l) = pure (LitE l)
-    traverse _ (VarE v) = pure (VarE v)
-    traverse _ HoleE = pure HoleE
-
-instance Foldable PatBase where
-    foldMap _ _ = mempty
-
-instance Traversable PatBase where
-    traverse _ WildP = pure WildP
-    traverse _ (VarP n) = pure (VarP n)
-    traverse f (ConP n ss) = ConP n <$> traverse f ss
 
 data ParseEnv = ParseEnv 
     { exprOperators :: OperatorTable Parser (Expr ())
@@ -128,8 +106,13 @@ parseValD = do
     rh <- parseExpr
     return $ ValD lh rh
 
-parsePat :: Parser (Pat ())
-parsePat = choice [wildP <$ symbol "_", varP <$> identifier]
+parsePat :: Given ParseEnv => Parser (Pat ())
+parsePat = do
+    p <- choice [wildP <$ symbol "_", varP <$> identifier]
+    sig <- optional $ symbol "::" *> parseType
+    case sig of
+        Nothing -> return p
+        Just t -> return $ () :< SigP t p
 
 lambda :: Given ParseEnv => Parser (Expr ())
 lambda = do

@@ -105,6 +105,10 @@ typePat _ (_ :< WildP) = do
 typePat _ (_ :< VarP v) = do
     n <- freshName
     return $ VarT n :< VarP v
+typePat bs (_ :< SigP t up) = do
+    p <- typePat bs up
+    unify t (extract p)
+    applyPat p
 typePat bs (_ :< ConP name ups) = case bs ^? ix name of
     Nothing -> typeError ("Not in scope:" <+> prettyName name)
     Just t -> do
