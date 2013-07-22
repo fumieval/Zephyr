@@ -42,12 +42,14 @@ varBind k v t
 
 unify :: Type Kind -> Type Kind -> TypeCheck ()
 unify ta tb = join $ uni <$> apply ta <*> apply tb where
+    uni (j :< _) (k :< _) | j /= k = typeError $ "Kind mismatch:" <+> prettyKind j <+> "~" <+> prettyKind k
     uni (_ :< AppT s t) (_ :< AppT u v) = do
         uni s u
         unify t v
     uni (k :< VarT s) t = varBind k s t
     uni s (k :< VarT t) = varBind k t s
     uni (_ :< ConT s) (_ :< ConT t) | s == t = return ()
+    uni (_ :< ArrT) (_ :< ArrT) = return ()
     uni s t = typeError $ "Failed to unify" <+> prettyType s <+> "with" <+> prettyType t
 
 apply :: Type Kind -> TypeCheck (Type Kind)
@@ -69,7 +71,7 @@ data TypeEnv = TypeEnv
 makeLenses ''TypeEnv
 
 instance Default TypeEnv where
-    def = TypeEnv Map.empty Map.empty Map.empty
+    def = TypeEnv Map.empty Map.empty (Map.fromList [("Int", StarK)])
 
 unionBindings :: Map.Map Name (Type Kind) -> TypeEnv -> TypeCheck TypeEnv
 unionBindings a env = do

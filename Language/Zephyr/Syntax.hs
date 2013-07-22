@@ -19,6 +19,7 @@ module Language.Zephyr.Syntax (
     , Kind(..)
     , Predicate(..)
     , module Control.Comonad.Cofree
+    , def
     ) where
 
 import Control.Applicative
@@ -32,6 +33,7 @@ import Text.Parser.Expression
 import Text.Parser.Token.Style
 import Text.Trifecta
 import Data.Void
+import Data.Default
 
 type Name = String
 
@@ -87,6 +89,10 @@ data ParseEnv = ParseEnv
     , typeOperators :: OperatorTable Parser (Type ())
     }
 
+instance Default ParseEnv where
+    def = ParseEnv { exprOperators = []
+        , typeOperators = [[Infix arr AssocRight]] } where
+        arr = (\x y -> () :< AppT (() :< AppT (() :< ArrT) x) y) <$ symbol "->"
 wildP :: Pat ()
 wildP = () :< WildP
 
@@ -131,12 +137,13 @@ parseValD = do
     return $ ValD lh rh
 
 parsePat :: Given ParseEnv => Parser (Pat ())
-parsePat = do
-    p <- choice [wildP <$ symbol "_", varP <$> identifier]
-    sig <- optional $ symbol "::" *> parseType
-    case sig of
-        Nothing -> return p
-        Just t -> return $ () :< SigP t p
+parsePat = parens parsePat <|> body where
+    body = do
+        p <- choice [wildP <$ symbol "_", varP <$> identifier]
+        sig <- optional $ symbol "::" *> parseType
+        case sig of
+            Nothing -> return p
+            Just t -> return $ () :< SigP t p
 
 lambda :: Given ParseEnv => Parser (Expr () ())
 lambda = do

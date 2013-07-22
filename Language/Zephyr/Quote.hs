@@ -27,6 +27,6 @@ zephyrExp = QuasiQuoter { quoteExp = parse
     , quotePat = const $ fail "Unsupported"
     , quoteType = const $ fail "Unsupported"
     , quoteDec = const $ fail "Unsupported" } where
-    parse s = case parseString (give (ParseEnv [] []) parseExpr) mempty s of
+    parse s = case parseString (give (def :: ParseEnv) parseExpr) mempty s of
         Success a -> lift a
         Failure err -> fail (show err)
