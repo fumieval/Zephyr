@@ -10,10 +10,12 @@ import Language.Haskell.TH.Quote
 import Language.Zephyr.Syntax as Z
 import Text.Trifecta
 
+deriveLift ''Z.Predicate
+deriveLift ''Z.TyVar
+deriveLift ''Z.Kind
 deriveLift ''Z.ExprBase
 deriveLift ''Z.PatBase
-deriveLift ''Z.TyVar
-deriveLift ''Z.Type
+deriveLift ''Z.TypeBase
 deriveLift ''Z.Lit
 deriveLift ''Z.Clause
 

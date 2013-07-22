@@ -1,10 +1,11 @@
-{-# LANGUAGE Rank2Types, DeriveFunctor, OverloadedStrings #-}
+{-# LANGUAGE Rank2Types, DeriveFunctor, OverloadedStrings, TemplateHaskell #-}
 module Language.Zephyr.TypeCheck where
 import Control.Applicative
 import Control.Comonad
 import Control.Lens
 import Control.Monad
 import Control.Monad.Free
+import Data.Default
 import Language.Zephyr.Lens
 import Language.Zephyr.Quote
 import Language.Zephyr.Syntax
@@ -13,8 +14,8 @@ import Text.PrettyPrint
 import qualified Data.Map as Map
 
 data TypeCheckBase a = TypeError Doc
-    | Subst TyVar Type a
-    | Apply Type (Type -> a)
+    | Subst TyVar (Type Kind) a
+    | Apply (Type Kind) (Type Kind -> a)
     | FreshName (TyVar -> a) deriving Functor
 
 runTypeCheck :: TypeCheck a -> Either Doc a
@@ -33,88 +34,119 @@ freshName = liftF $ FreshName id
 typeError :: Doc -> TypeCheck a
 typeError = liftF . TypeError
 
-varBind :: TyVar -> Type -> TypeCheck ()
-varBind v t
-    | t == VarT v = return ()
+varBind :: Kind -> TyVar -> Type Kind -> TypeCheck ()
+varBind k v t
+    | t == k :< VarT v = return ()
     | elemOf tyvars v t = typeError "occurs check failed"
     | otherwise = liftF $ Subst v t ()
 
-unify :: Type -> Type -> TypeCheck ()
+unify :: Type Kind -> Type Kind -> TypeCheck ()
 unify ta tb = join $ uni <$> apply ta <*> apply tb where
-    uni (AppT s t) (AppT u v) = do
+    uni (_ :< AppT s t) (_ :< AppT u v) = do
         uni s u
         unify t v
-    uni (VarT s) t = varBind s t
-    uni s (VarT t) = varBind t s
-    uni (ConT s) (ConT t) | s == t = return ()
-    uni s t = typeError $ text "Failed to unify " <> prettyType s <> text " with " <> prettyType t
+    uni (k :< VarT s) t = varBind k s t
+    uni s (k :< VarT t) = varBind k t s
+    uni (_ :< ConT s) (_ :< ConT t) | s == t = return ()
+    uni s t = typeError $ "Failed to unify" <+> prettyType s <+> "with" <+> prettyType t
 
-apply :: Type -> TypeCheck Type
+apply :: Type Kind -> TypeCheck (Type Kind)
 apply t = liftF $ Apply t id
 
-arrT :: Type -> Type -> Type
-arrT s t = AppT (AppT ArrT s) t
+arrT :: Type Kind -> Type Kind -> Type Kind
+arrT s t = StarK :< AppT (FunK StarK StarK :< AppT (FunK StarK (FunK StarK StarK) :< ArrT) s) t
 
-exprTypeOf :: Type -> Expr Type -> TypeCheck (Expr Type)
+exprTypeOf :: Type Kind -> Expr (Type Kind) (Type Kind) -> TypeCheck (Expr (Type Kind) (Type Kind))
 exprTypeOf t e = do
     unify t (extract e)
     traverse apply e
 
-type Binding = Map.Map Name Type
+data TypeEnv = TypeEnv
+    { _typeBindings :: Map.Map Name (Type Kind)
+    , _kindBindings :: Map.Map TyVar Kind
+    , _tyconBindings :: Map.Map Name Kind
+    }
+makeLenses ''TypeEnv
 
-unionBinding :: Binding -> Binding -> TypeCheck Binding
-unionBinding a b = do
-    mapM_ (uncurry unify) $ Map.elems $ Map.intersectionWith (,) a b
-    return $ Map.union a b
+instance Default TypeEnv where
+    def = TypeEnv Map.empty Map.empty Map.empty
 
-typeExpr :: Binding -> Expr a -> TypeCheck (Expr Type)
-typeExpr bs (_ :< expr) = case expr of
-    SigE t e -> typeExpr bs e >>= exprTypeOf t
-    VarE s -> case bs ^? ix s of
+unionBindings :: Map.Map Name (Type Kind) -> TypeEnv -> TypeCheck TypeEnv
+unionBindings a env = do
+    mapM_ (uncurry unify) $ Map.elems $ Map.intersectionWith (,) a (_typeBindings env)
+    return $ typeBindings %~ Map.union a $ env
+
+kindType :: TypeEnv -> Type a -> TypeCheck (Type Kind) -- unification?
+kindType env s = case unwrap s of
+    ArrT -> return $ FunK StarK (FunK StarK StarK) :< ArrT
+    AppT s' t' -> do
+        s <- kindType env s'
+        t <- kindType env t'
+        case extract s of
+            FunK _ b -> return (b :< AppT s t)
+            _ -> typeError "Kind mismatch"
+    ConT n -> case env ^? tyconBindings . ix n of
+        Nothing -> typeError "Not in scope: type constructor"
+        Just k -> return $ k :< ConT n
+    VarT v -> case env ^? kindBindings . ix v of
+        Nothing -> typeError "Not in scope: type variable"
+        Just k -> return $ k :< VarT v
+    SigT k t' -> do
+        t <- kindType env t'
+        if extract t == k
+            then return t
+            else typeError "Kind mismatch"
+typeExpr :: TypeEnv -> Expr a a -> TypeCheck (Expr (Type Kind) (Type Kind))
+typeExpr env (_ :< expr) = case expr of
+    SigE t' e -> do
+        t <- kindType env t'
+        typeExpr env e >>= exprTypeOf t
+    VarE s -> case env ^? typeBindings . ix s of
         Just t -> return $ t :< VarE s
         Nothing -> do
             n <- freshName
-            return $ VarT n :< VarE s
+            return $ (StarK :< VarT n) :< VarE s
     AppE uf ug -> do
         a <- VarT <$> freshName
         b <- VarT <$> freshName
 
-        g <- typeExpr bs ug >>= exprTypeOf a
-        f <- typeExpr bs uf >>= exprTypeOf (a `arrT` b)
+        g <- typeExpr env ug >>= exprTypeOf (StarK :< a)
+        f <- typeExpr env uf >>= exprTypeOf ((StarK :< a) `arrT` (StarK :< b))
 
-        return $ b :< AppE f g
+        return $ (StarK :< b) :< AppE f g
     LambdaE [Clause ups ue] -> do
-        ps <- mapM (typePat bs) ups -- slack
-        bindings <- unionBinding bs $ Map.fromList (ps ^.. traverse . patVars)
-        e <- typeExpr bindings ue >>= traverse apply
+        ps <- mapM (typePat env) ups -- slack
+        bs <- unionBindings (Map.fromList (ps ^.. traverse . patVars)) env
+        e <- typeExpr bs ue >>= traverse apply
         ps' <- mapM (traverse apply) ps
         return $ foldr (\p r -> extract p `arrT` r) (extract e) ps' :< LambdaE [Clause ps' e]
-    LitE (IntegerL i) -> return $ ConT "Int" :< LitE (IntegerL i)
-    LitE (StringL i) -> return $ ConT "String" :< LitE (StringL i)
+    LitE (IntegerL i) -> return $ (StarK :< ConT "Int") :< LitE (IntegerL i)
+    LitE (StringL i) -> return $ (StarK :< ConT "String") :< LitE (StringL i)
 
-typePat :: Binding -> Pat a -> TypeCheck (Pat Type)
+typePat :: TypeEnv -> Pat a -> TypeCheck (Pat (Type Kind))
 typePat _ (_ :< WildP) = do
     n <- freshName
-    return $ VarT n :< WildP
+    return $ (StarK :< VarT n) :< WildP
 typePat _ (_ :< VarP v) = do
     n <- freshName
-    return $ VarT n :< VarP v
-typePat bs (_ :< SigP t up) = do
-    p <- typePat bs up
+    return $ (StarK :< VarT n) :< VarP v
+typePat env (_ :< SigP t' up) = do
+    t <- kindType env t'
+    p <- typePat env up
     unify t (extract p)
     traverse apply p
-typePat bs (_ :< ConP name ups) = case bs ^? ix name of
+typePat env (_ :< ConP name ups) = case env ^? typeBindings . ix name of
     Nothing -> typeError ("Not in scope:" <+> prettyName name)
     Just t -> do
-        ps <- mapM (typePat bs) ups
+        ps <- mapM (typePat env) ups
         c <- go 0 t ps
         ps' <- mapM (traverse apply) ps
         return $ c :< ConP name ps'
     where
-        go n (AppT (AppT ArrT s) t) (p : ps) = do
+        go n (_ :< AppT (_ :< AppT (_ :< ArrT) s) t) (p : ps) = do
             unify (extract p) s
             go (n + 1) t ps
-        go n (ConT t) [] = return (ConT t)
+        go n (k :< ConT t) [] = return (k :< ConT t)
         go n _ _ = typeError $ "Constructor"
             <+> prettyName name
             <+> "should have"
