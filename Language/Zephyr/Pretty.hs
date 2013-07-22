@@ -5,13 +5,18 @@ import Language.Zephyr.Syntax
 prettyName :: Name -> Doc
 prettyName n = text n
 
+parensPrec :: Int -> Doc -> Int -> Doc
+parensPrec m doc n | m < n = parens doc
+parensPrec m doc n = doc
+
 prettyType :: Type a -> Doc
-prettyType (_ :< AppT (_ :< AppT (_ :< ArrT) s) t) = parens (prettyType s <+> text "->" <+> prettyType t)
-prettyType (_ :< ArrT) = parens (text "->")
-prettyType (_ :< AppT s t) = parens (prettyType s <+> prettyType t)
-prettyType (_ :< VarT (UserVar v)) = prettyName v
-prettyType (_ :< VarT (AutoVar n)) = text "#" <> int n
-prettyType (_ :< ConT v) = text v
+prettyType = flip p 0 where
+    p (_ :< AppT (_ :< AppT (_ :< ArrT) s) t) = parensPrec 7 $ p s 8 <+> text "->" <+> p t 7
+    p (_ :< ArrT) = const $ parens (text "->")
+    p (_ :< AppT s t) = parensPrec 8 $ p s 8 <+> p t 9
+    p (_ :< VarT (UserVar v)) = const $ prettyName v
+    p (_ :< VarT (AutoVar n)) = const $ text "#" <> int n
+    p (_ :< ConT v) = const $ text v
 
 prettyKind :: Kind -> Doc
 prettyKind StarK = text "*"
