@@ -50,7 +50,7 @@ unify ta tb = join $ uni <$> apply ta <*> apply tb where
     uni s (k :< VarT t) = varBind k t s
     uni (_ :< ConT s) (_ :< ConT t) | s == t = return ()
     uni (_ :< ArrT) (_ :< ArrT) = return ()
-    uni s t = typeError $ "Failed to unify" <+> prettyType s <+> "with" <+> prettyType t
+    uni s t = typeError $ "Couldn't unify" <+> prettyType s <+> "with" <+> prettyType t
 
 apply :: Type Kind -> TypeCheck (Type Kind)
 apply t = liftF $ Apply t id
@@ -70,6 +70,7 @@ data TypeEnv = TypeEnv
     }
 makeLenses ''TypeEnv
 
+
 instance Default TypeEnv where
     def = TypeEnv Map.empty Map.empty (Map.fromList [("Int", StarK)])
 
@@ -88,16 +89,18 @@ kindType env s = case unwrap s of
             FunK _ b -> return (b :< AppT s t)
             _ -> typeError "Kind mismatch"
     ConT n -> case env ^? tyconBindings . ix n of
-        Nothing -> typeError "Not in scope: type constructor"
+        Nothing -> typeError $ "Not in scope: type constructor" <+> quotes (prettyName n)
         Just k -> return $ k :< ConT n
     VarT v -> case env ^? kindBindings . ix v of
-        Nothing -> typeError "Not in scope: type variable"
+        Nothing -> typeError $ "Not in scope: type variable" <+> quotes (prettyType (() :< VarT v))
         Just k -> return $ k :< VarT v
     SigT k t' -> do
         t <- kindType env t'
         if extract t == k
             then return t
-            else typeError "Kind mismatch"
+            else typeError $ "Kind mismatch:" <+> prettyKind (extract t) <+> "~" <+> prettyKind k
+    ForallT v k t -> kindType (kindBindings . at v .~ Just k $ env) t
+
 typeExpr :: TypeEnv -> Expr a a -> TypeCheck (Expr (Type Kind) (Type Kind))
 typeExpr env (_ :< expr) = case expr of
     SigE t' e -> do
@@ -105,9 +108,7 @@ typeExpr env (_ :< expr) = case expr of
         typeExpr env e >>= exprTypeOf t
     VarE s -> case env ^? typeBindings . ix s of
         Just t -> return $ t :< VarE s
-        Nothing -> do
-            n <- freshName
-            return $ (StarK :< VarT n) :< VarE s
+        Nothing -> typeError $ "Not in scope: " <+> quotes (prettyName s)
     AppE uf ug -> do
         a <- VarT <$> freshName
         b <- VarT <$> freshName
@@ -122,8 +123,11 @@ typeExpr env (_ :< expr) = case expr of
         e <- typeExpr bs ue >>= traverse apply
         ps' <- mapM (traverse apply) ps
         return $ foldr (\p r -> extract p `arrT` r) (extract e) ps' :< LambdaE [Clause ps' e]
-    LitE (IntegerL i) -> return $ (StarK :< ConT "Int") :< LitE (IntegerL i)
-    LitE (StringL i) -> return $ (StarK :< ConT "String") :< LitE (StringL i)
+    LitE lit -> return $ typeLit lit :< LitE lit
+
+typeLit :: Lit -> Type Kind
+typeLit (IntegerL i) = StarK :< ConT "Int"
+typeLit (StringL i) = StarK :< ConT "String"
 
 typePat :: TypeEnv -> Pat a -> TypeCheck (Pat (Type Kind))
 typePat _ (_ :< WildP) = do
@@ -137,6 +141,7 @@ typePat env (_ :< SigP t' up) = do
     p <- typePat env up
     unify t (extract p)
     traverse apply p
+typePat _ (_ :< LitP lit) = return $ typeLit lit :< LitP lit
 typePat env (_ :< ConP name ups) = case env ^? typeBindings . ix name of
     Nothing -> typeError ("Not in scope:" <+> prettyName name)
     Just t -> do

@@ -54,6 +54,7 @@ data ExprBase b a = VarE Name
 data PatBase a = WildP
     | VarP Name
     | ConP Name [a]
+    | LitP Lit
     | SigP (Type ()) a deriving (Show, Eq, Functor, Foldable, Traversable)
 
 type Pat = Cofree PatBase
@@ -70,7 +71,7 @@ exmap f (t :< HoleE) = f t :< HoleE
 
 type ExprTable = OperatorTable Parser (Expr () ())
 
-data TypeBase a = ArrT | VarT TyVar | ConT Name | AppT a a | ForallT TyVar Predicate a | SigT Kind a deriving (Show, Eq, Functor, Foldable, Traversable)
+data TypeBase a = ArrT | VarT TyVar | ConT Name | AppT a a | ForallT TyVar Kind a | SigT Kind a deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data Predicate = Dummy Predicate
 
@@ -93,19 +94,14 @@ instance Default ParseEnv where
     def = ParseEnv { exprOperators = []
         , typeOperators = [[Infix arr AssocRight]] } where
         arr = (\x y -> () :< AppT (() :< AppT (() :< ArrT) x) y) <$ symbol "->"
-wildP :: Pat ()
-wildP = () :< WildP
-
-varP :: Name -> Pat ()
-varP name = () :< VarP name
 
 literal :: Parser Lit
 literal = choice [IntegerL <$> natural, StringL <$> stringLiteral]
 
-identifier :: Parser String
+identifier :: Parser Name
 identifier = ident haskellIdents
 
-upperIdentifier :: Parser String
+upperIdentifier :: Parser Name
 upperIdentifier = (:) <$> upper <*> identifier
 
 varE :: Name -> Expr () ()
@@ -139,7 +135,10 @@ parseValD = do
 parsePat :: Given ParseEnv => Parser (Pat ())
 parsePat = parens parsePat <|> body where
     body = do
-        p <- choice [wildP <$ symbol "_", varP <$> identifier]
+        p <- choice [(() :< WildP) <$ symbol "_"
+            , (():<) <$> (ConP <$> upperIdentifier <*> many parsePat)
+            , (():<) <$> VarP <$> identifier
+            , (():<) <$> LitP <$> literal ]
         sig <- optional $ symbol "::" *> parseType
         case sig of
             Nothing -> return p
@@ -188,5 +187,17 @@ termTypeA = foldl appT <$> termType <*> many termType where
 sectionType :: Parser (Type ())
 sectionType = (():<ArrT) <$ parens (symbol "->")
 
+parseKind :: Parser Kind
+parseKind = choice [StarK <$ symbol "*", FunK <$> parseKind <*> parseKind]
+
+forallType :: Given ParseEnv => Parser (Type ())
+forallType = do
+    symbol "forall"
+    v <- identifier
+    k <- symbol "::" *> parseKind
+    symbol "=>"
+    t <- parseType
+    return $ () :< ForallT (UserVar v) k t
+
 parseType :: Given ParseEnv => Parser (Type ())
-parseType = buildExpressionParser (typeOperators given) termTypeA
+parseType = forallType <|> buildExpressionParser (typeOperators given) termTypeA

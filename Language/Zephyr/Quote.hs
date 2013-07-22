@@ -2,6 +2,7 @@
 module Language.Zephyr.Quote where
 
 import Control.Comonad.Cofree
+import Control.Applicative
 import Data.Monoid
 import Data.Reflection
 import Language.Haskell.TH
@@ -27,6 +28,6 @@ zephyrExp = QuasiQuoter { quoteExp = parse
     , quotePat = const $ fail "Unsupported"
     , quoteType = const $ fail "Unsupported"
     , quoteDec = const $ fail "Unsupported" } where
-    parse s = case parseString (give (def :: ParseEnv) parseExpr) mempty s of
+    parse s = case parseString (give (def :: ParseEnv) parseExpr <* eof) mempty s of
         Success a -> lift a
         Failure err -> fail (show err)
