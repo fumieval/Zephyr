@@ -124,6 +124,9 @@ typeExpr env (_ :< expr) = case expr of
         ps' <- mapM (traverse apply) ps
         return $ foldr (\p r -> extract p `arrT` r) (extract e) ps' :< LambdaE [Clause ps' e]
     LitE lit -> return $ typeLit lit :< LitE lit
+    HoleE -> do
+        t <- VarT <$> freshName
+        return $ (StarK :< t) :< HoleE
 
 typeLit :: Lit -> Type Kind
 typeLit (IntegerL i) = StarK :< ConT "Int"

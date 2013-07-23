@@ -69,15 +69,7 @@ exmap f (t :< AppE a b) = f t :< AppE (exmap f a) (exmap f b)
 exmap f (t :< LitE l) = f t :< LitE l
 exmap f (t :< HoleE) = f t :< HoleE
 
-type ExprTable = OperatorTable Parser (Expr () ())
-
 data TypeBase a = ArrT | VarT TyVar | ConT Name | AppT a a | ForallT TyVar Kind a | SigT Kind a deriving (Show, Eq, Functor, Foldable, Traversable)
-
-data Predicate = Dummy Predicate
-
-deriving instance Show Predicate
-deriving instance Eq Predicate
-deriving instance Ord Predicate
 
 data Kind = StarK | ConK Name | FunK Kind Kind deriving (Show, Eq, Ord)
 
