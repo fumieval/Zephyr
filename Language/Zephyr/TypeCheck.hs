@@ -64,20 +64,21 @@ exprTypeOf t e = do
     traverse apply e
 
 data TypeEnv = TypeEnv
-    { _typeBindings :: Map.Map Name (Type Kind)
+    { _typeBindings :: Map.Map Name (BVar, Type Kind)
     , _kindBindings :: Map.Map TyVar Kind
     , _tyconBindings :: Map.Map Name Kind
     }
 makeLenses ''TypeEnv
 
-
 instance Default TypeEnv where
     def = TypeEnv Map.empty Map.empty (Map.fromList [("Int", StarK)])
 
-unionBindings :: Map.Map Name (Type Kind) -> TypeEnv -> TypeCheck TypeEnv
-unionBindings a env = do
-    mapM_ (uncurry unify) $ Map.elems $ Map.intersectionWith (,) a (_typeBindings env)
-    return $ typeBindings %~ Map.union a $ env
+updateBindings :: [(Name, Type Kind)] -> TypeEnv -> TypeCheck TypeEnv
+updateBindings bs = execStateT $ zoom typeBindings $ do
+	traverse . _1 . boundLevel += 1
+	iforM_ bs $ \(i, (name, t)) -> do
+		join $ use $ ix name . _2 . act (lift . unify t)
+		at name .= Just (BVar 0 i, t)
 
 kindType :: TypeEnv -> Type a -> TypeCheck (Type Kind) -- unification?
 kindType env s = case unwrap s of
@@ -107,7 +108,7 @@ typeExpr env (_ :< expr) = case expr of
         t <- kindType env t'
         typeExpr env e >>= exprTypeOf t
     VarE s -> case env ^? typeBindings . ix s of
-        Just t -> return $ t :< VarE s
+        Just (i, t) -> return $ t :< VarE s
         Nothing -> typeError $ "Not in scope: " <+> quotes (prettyName s)
     AppE uf ug -> do
         a <- VarT <$> freshName
@@ -119,7 +120,7 @@ typeExpr env (_ :< expr) = case expr of
         return $ (StarK :< b) :< AppE f g
     LambdaE [Clause ups ue] -> do
         ps <- mapM (typePat env) ups -- slack
-        bs <- unionBindings (Map.fromList (ps ^.. traverse . patVars)) env
+        bs <- updateBindings (ps ^.. traverse . patVars) env
         e <- typeExpr bs ue >>= traverse apply
         ps' <- mapM (traverse apply) ps
         return $ foldr (\p r -> extract p `arrT` r) (extract e) ps' :< LambdaE [Clause ps' e]
