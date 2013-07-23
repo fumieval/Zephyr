@@ -11,8 +11,6 @@ import Language.Haskell.TH.Quote
 import Language.Zephyr.Syntax as Z
 import Text.Trifecta
 
-deriveLift ''Z.BVar
-deriveLift ''Z.Predicate
 deriveLift ''Z.TyVar
 deriveLift ''Z.Kind
 deriveLift ''Z.ExprBase

@@ -31,6 +31,6 @@ var name f (t :< VarE n) | name == n = f (t :< VarE n)
 var name f (t :< AppE a b) = (t :<) <$> (AppE <$> var name f a <*> var name f b)
 var name f (t :< LambdaE cs) = (t :<) <$> (LambdaE <$> traverse (traverse (var name f)) cs)
 var name f (t :< LitE l) = pure (t :< LitE l)
-var name f (t :< SigE s l) = undefined
+var name f (t :< SigE s l) = (t :<) <$> SigE s <$> var name f l
 var name f (t :< BoundE v) = pure (t :< BoundE v)
 var _ _ (t :< HoleE) = pure (t :< HoleE)

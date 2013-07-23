@@ -2,9 +2,6 @@
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module Language.Zephyr.Syntax (
     Name
-    , BVar(..)
-    , boundLevel
-    , bound
     , ParseEnv(..)
     , Clause(..)
     , Dec(..)
@@ -20,7 +17,6 @@ module Language.Zephyr.Syntax (
     , parseType
     , TyVar(..)
     , Kind(..)
-    , Predicate(..)
     , module Control.Comonad.Cofree
     , def
     ) where
@@ -38,9 +34,6 @@ import Text.Trifecta
 import Data.Void
 import Data.Default
 
-data BVar = BVar { _boundLevel :: Int, _boundId :: Int } deriving (Show, Eq, Ord)
-makeLenses ''BVar
-
 type Name = String
 
 data Clause b a = Clause [Pat b] a deriving (Show, Eq, Functor, Foldable, Traversable)
@@ -50,7 +43,7 @@ data Lit = IntegerL Integer | StringL String deriving (Show, Eq)
 data Dec a = FunD Name [Clause a a] | ValD (Pat a) (Expr a a) deriving (Show, Eq)
 
 data ExprBase b a = VarE Name
-	| BoundE BVar
+	| BoundE Int
     | SigE (Type ()) a
     | AppE a a
     | LambdaE [Clause b a]
