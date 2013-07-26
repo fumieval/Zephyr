@@ -8,6 +8,8 @@ module Language.Zephyr.Syntax (
     , ExprBase(..)
     , PatBase(..)
     , Expr
+    , Expr'
+    , arrT
     , exmap
     , Pat
     , Lit(..)
@@ -60,6 +62,8 @@ data PatBase a = WildP
 type Pat = Cofree PatBase
 type Expr p = Cofree (ExprBase p)
 
+type Expr' a = Expr a a
+
 exmap :: (a -> b) -> Cofree (ExprBase a) a -> Cofree (ExprBase b) b
 exmap f (t :< LambdaE cs) = f t :< LambdaE (map go cs) where
     go (Clause ps a) = Clause (fmap (fmap f) ps) (exmap f a)
@@ -105,6 +109,9 @@ litE l = () :< LitE l
 
 appE :: Expr () () -> Expr () () -> Expr () ()
 appE f g = () :< AppE f g
+
+arrT :: Type Kind -> Type Kind -> Type Kind
+arrT s t = StarK :< AppT (FunK StarK StarK :< AppT (FunK StarK (FunK StarK StarK) :< ArrT) s) t
 
 parseOperator :: Parser (Int, Operator Parser (Expr () ()))
 parseOperator = do

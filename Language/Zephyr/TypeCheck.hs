@@ -5,6 +5,7 @@ import Control.Comonad
 import Control.Lens
 import Control.Monad
 import Control.Monad.Free
+import Control.Monad.State
 import Data.Default
 import Language.Zephyr.Lens
 import Language.Zephyr.Quote
@@ -55,16 +56,13 @@ unify ta tb = join $ uni <$> apply ta <*> apply tb where
 apply :: Type Kind -> TypeCheck (Type Kind)
 apply t = liftF $ Apply t id
 
-arrT :: Type Kind -> Type Kind -> Type Kind
-arrT s t = StarK :< AppT (FunK StarK StarK :< AppT (FunK StarK (FunK StarK StarK) :< ArrT) s) t
-
 exprTypeOf :: Type Kind -> Expr (Type Kind) (Type Kind) -> TypeCheck (Expr (Type Kind) (Type Kind))
 exprTypeOf t e = do
     unify t (extract e)
     traverse apply e
 
 data TypeEnv = TypeEnv
-    { _typeBindings :: Map.Map Name (BVar, Type Kind)
+    { _typeBindings :: Map.Map Name (Int, Type Kind)
     , _kindBindings :: Map.Map TyVar Kind
     , _tyconBindings :: Map.Map Name Kind
     }
@@ -75,10 +73,10 @@ instance Default TypeEnv where
 
 updateBindings :: [(Name, Type Kind)] -> TypeEnv -> TypeCheck TypeEnv
 updateBindings bs = execStateT $ zoom typeBindings $ do
-	traverse . _1 . boundLevel += 1
-	iforM_ bs $ \(i, (name, t)) -> do
-		join $ use $ ix name . _2 . act (lift . unify t)
-		at name .= Just (BVar 0 i, t)
+	traverse . _1 += length bs
+	iforM_ bs $ \i (name, t) -> do
+		get >>= perform (ix name . _2 . act (lift . unify t))
+		at name .= Just (length bs - i - 1, t)
 
 kindType :: TypeEnv -> Type a -> TypeCheck (Type Kind) -- unification?
 kindType env s = case unwrap s of
@@ -108,7 +106,7 @@ typeExpr env (_ :< expr) = case expr of
         t <- kindType env t'
         typeExpr env e >>= exprTypeOf t
     VarE s -> case env ^? typeBindings . ix s of
-        Just (i, t) -> return $ t :< VarE s
+        Just (i, t) -> return $ t :< BoundE i
         Nothing -> typeError $ "Not in scope: " <+> quotes (prettyName s)
     AppE uf ug -> do
         a <- VarT <$> freshName
@@ -146,7 +144,7 @@ typePat env (_ :< SigP t' up) = do
     unify t (extract p)
     traverse apply p
 typePat _ (_ :< LitP lit) = return $ typeLit lit :< LitP lit
-typePat env (_ :< ConP name ups) = case env ^? typeBindings . ix name of
+typePat env (_ :< ConP name ups) = case env ^? typeBindings . ix name . _2 of
     Nothing -> typeError ("Not in scope:" <+> prettyName name)
     Just t -> do
         ps <- mapM (typePat env) ups

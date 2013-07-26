@@ -1,4 +1,4 @@
-module Language.Zephyr.Pretty where
+module Language.Zephyr.Pretty (prettyName, prettyType, prettyKind) where
 import Text.PrettyPrint
 import Language.Zephyr.Syntax
 
