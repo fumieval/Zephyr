@@ -106,7 +106,7 @@ typeExpr env (_ :< expr) = case expr of
         t <- kindType env t'
         typeExpr env e >>= exprTypeOf t
     VarE s -> case env ^? typeBindings . ix s of
-        Just (i, t) -> return $ t :< BoundE i
+        Just (i, t) -> return $ t :< VarE s
         Nothing -> typeError $ "Not in scope: " <+> quotes (prettyName s)
     AppE uf ug -> do
         a <- VarT <$> freshName

@@ -13,6 +13,7 @@ import Control.Applicative
 import Control.Lens
 import Data.Default
 
+-- TEMPORARILY DISABLED
 -- TODO: earlier unification
 
 data Runtime = Runtime {
