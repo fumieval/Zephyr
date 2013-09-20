@@ -1,10 +1,14 @@
-{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, TemplateHaskell #-}
 module Language.Zephyr.Internal.Combinator where
 
 import Prelude hiding (elem, notElem)
 import Control.Monad.Free
 import Data.Foldable
 import Control.Lens
+
+import Language.Haskell.TH
+import Language.Haskell.TH.Quote
+import Data.Void
 
 data SKI a = S | K | I | App a a | Undefined String deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
@@ -92,9 +96,6 @@ bindee x ex = go (unApp ex) where
 
         | otherwise = _S $$ bindee x al $$ bindee x ar
 
-import Language.Haskell.TH
-import Language.Haskell.TH.Quote
-import Data.Void
 
 unlambdaParser :: Read e => Parser (Expr e)
 unlambdaParser = char '`' *> ((:$) <$> unlambdaParser <*> unlambdaParser)
